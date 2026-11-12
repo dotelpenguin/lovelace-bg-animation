@@ -304,7 +304,8 @@ function initializeLovelaceVariables() {
   try {
     lovelaceUI = {}
     lovelaceUI.haMainElement = document.querySelector("body > home-assistant")?.shadowRoot?.querySelector("home-assistant-main")?.shadowRoot;
-    lovelaceUI.panelElement = lovelaceUI.haMainElement?.querySelector("ha-drawer > partial-panel-resolver > ha-panel-lovelace")?.shadowRoot;
+    lovelaceUI.panelResolverElement = lovelaceUI.haMainElement?.querySelector("ha-drawer > partial-panel-resolver") ?? lovelaceUI.haMainElement?.querySelector("partial-panel-resolver");
+    lovelaceUI.panelElement = lovelaceUI.panelResolverElement?.querySelector("ha-panel-lovelace")?.shadowRoot;
     lovelaceUI.huiRootElement = lovelaceUI.panelElement?.querySelector("hui-root");
     lovelaceUI.headerElement = lovelaceUI.huiRootElement?.shadowRoot?.querySelector("div > div.header");
     lovelaceUI.sidebarElement = lovelaceUI.haMainElement?.querySelector("ha-sidebar");
@@ -355,6 +356,34 @@ function toggleLovelaceStyle(state) {
     const el = lovelaceUI[key];
     el?.classList?.[state ? 'add' : 'remove']('bg-animation-style');
   });
+  togglePanelResolverBackground(state);
+}
+
+// Home Assistant 2026.11+ paints the theme background once for all panels via
+// `partial-panel-resolver::before` (z-index: -1, using --ha-panel-background).
+// That opaque layer sits above our container (z-index: -10), hiding the animation.
+// Clear it while a background is active and restore it when disabled.
+// No-op on versions before 2026.11, where the element has no such layer.
+function togglePanelResolverBackground(state) {
+  const resolver = lovelaceUI.panelResolverElement;
+  const haMain = lovelaceUI.haMainElement;
+  if (!resolver || !haMain) return;
+
+  let mainStyle = haMain.querySelector("#bg-animation-styles-main");
+  if (!mainStyle) {
+    mainStyle = document.createElement("style");
+    mainStyle.id = "bg-animation-styles-main";
+    mainStyle.textContent = "partial-panel-resolver.bg-animation-style::before {background: transparent !important; display: none !important;}";
+    haMain.prepend(mainStyle);
+  }
+
+  if (state) {
+    resolver.style.setProperty("--ha-panel-background", "transparent");
+    resolver.classList.add("bg-animation-style");
+  } else {
+    resolver.style.removeProperty("--ha-panel-background");
+    resolver.classList.remove("bg-animation-style");
+  }
 }
 
 async function processBackgroundFrame(packageConfig, packageManifest) {
@@ -717,6 +746,9 @@ async function initialize() {
     await setPlaylistIndexes();
     await getGalleryRootManifest();
     await initializeStagePlaylists();
+  } else {
+    // Not a Lovelace dashboard (e.g. Settings) or no bg-animation config: restore HA's panel background.
+    togglePanelResolverBackground(false);
   }
 };
 
